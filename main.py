@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from abc import ABC
 import wmi
 from getpass import getpass
+from utils import generate_password
 
 @dataclass
 class User:
@@ -33,9 +34,19 @@ class AbstractUsers(ABC):
 
     def __init__(self, path_users_file: str =None, ip_remote_comp: str = None):
         self.ip_remote_comp = ip_remote_comp
-        self.system_users_list = self.get_local_users()
-        self.users_list = []
+        self.system_users = None
+        self.migration_users = None
         self.path_file = path_users_file
+
+    def get_migration_users(self):
+        if self.path_file is not None:
+            return self.get_users_from_file()
+        else:
+            return self.get_remote_users()
+
+    def run(self) -> None:
+        self.system_users = self.get_local_users()
+        self.migration_users = self.get_migration_users()
 
     def get_local_users(self) -> list:
         raise NotImplemented
@@ -62,7 +73,9 @@ class AbstractUsers(ABC):
         return self
 
     def prn(self):
-        for user in self.system_users_list:
+        for user in self.system_users:
+            print(str(user))
+        for user in self.migration_users:
             print(str(user))
 
 
@@ -71,16 +84,36 @@ def strip_(username):
     return username.strip()
 
 class WindowsUsers(AbstractUsers):
-    users_list = []
     # def __init__(self, ip_remote_comp=None):
     #     super().__init__(ip_remote_comp)
 
-    def get_remote_users(self):
-        user = input('Введите имя пользвателя: ')
+    def get_remote_users(self) -> list:
+        """
+        TODO Работает но очень медленно, проблема в ассоциации пользователя с группами
+
+        """
+        remote_user = input('Введите имя пользвателя: ')
         password = getpass('Введите пароль: ')
-        c = wmi.WMI(self.ip_remote_comp, user=user, password=password)
-        for user in c.Win32_UserAccount():
-            print(user)
+        c = wmi.WMI(self.ip_remote_comp, user=remote_user, password=password)
+        result = []
+        for user_wmi_info in c.Win32_UserAccount():
+            if user_wmi_info.Disabled:
+                print(f"Пользователь {user_wmi_info.Caption} пропущен, так как аккаунт деактивирован")
+                continue
+            groups = [
+                group.Caption.split("\\")[-1]
+                for group in user_wmi_info.associators(wmi_result_class="Win32_Group")
+            ]
+            user = User(
+                username =  user_wmi_info.Caption.split("\\")[-1],
+                fullname =  user_wmi_info.Fullname,
+                active = True,
+                need_pwd =  user_wmi_info.PasswordRequired,
+                can_change_pwd =  user_wmi_info.PasswordChangeable,
+                password =  "",
+                groups =  groups
+                )
+        return result
 
     @staticmethod
     def __execute_comand(cmd: list) -> str:
@@ -151,6 +184,11 @@ class WindowsUsers(AbstractUsers):
                 groups_start = True
                 result["groups"].append(row.split('*')[-1].strip())
         return result
+
+    def get_users_from_file(self):
+        print(self.path_file)
+        pass
+
 
 
 class Menu:
@@ -244,8 +282,8 @@ menu = {
 
 if __name__ == '__main__':
     users = WindowsUsers(ip_remote_comp='192.168.0.251')
-    # users = WindowsUsers()
-    users.get_remote_users()
+    # # users = WindowsUsers()
+    users.run()
     users.prn()
 
     # user_info = users.get_user_info("admin")
