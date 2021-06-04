@@ -4,6 +4,7 @@ from abc import ABC
 import wmi
 from getpass import getpass
 from utils import generate_password
+import csv
 
 @dataclass
 class User:
@@ -26,8 +27,6 @@ class User:
             f'Локальные группы: {" | ".join(self.groups):<100}\n' \
             f'{"_"*50}'
         return result
-
-
 
 
 class AbstractUsers(ABC):
@@ -73,19 +72,17 @@ class AbstractUsers(ABC):
         return self
 
     def prn(self):
-        for user in self.system_users:
-            print(str(user))
-        for user in self.migration_users:
-            print(str(user))
+        print("Местные: ")
+        if self.system_users is not None:
+            for user in self.system_users:
+                print(str(user))
+        print("Пришлые: ")
+        if self.migration_users is not None:
+            for user in self.migration_users:
+                print(str(user))
 
-
-
-def strip_(username):
-    return username.strip()
 
 class WindowsUsers(AbstractUsers):
-    # def __init__(self, ip_remote_comp=None):
-    #     super().__init__(ip_remote_comp)
 
     def get_remote_users(self) -> list:
         """
@@ -186,8 +183,22 @@ class WindowsUsers(AbstractUsers):
         return result
 
     def get_users_from_file(self):
-        print(self.path_file)
-        pass
+        """
+        Загрузка пользователей из файла
+        файл csv: 
+        столбцы и примерные данные:
+         username;fullname;active;need_pwd;can_change_pwd;password;groups
+         admin; admin full name; 1; 1; 0; 12342; Администраторы, Пользователи удаленного рабочего стола
+        """
+        result = []
+        with open(self.path_file, 'r', encoding="utf8", newline='\n') as fl:
+            reader = csv.DictReader(fl, delimiter=';', skipinitialspace=True)
+            for row in reader:
+                row['groups'] = [ group.strip() for group in row['groups'].split(",")]
+                user = User(**row)
+                result.append(user)
+        print(result)
+        return result
 
 
 
@@ -279,9 +290,9 @@ menu = {
 }
 
 
-
 if __name__ == '__main__':
-    users = WindowsUsers(ip_remote_comp='192.168.0.251')
+    # users = WindowsUsers(ip_remote_comp='192.168.0.251')
+    users = WindowsUsers(path_users_file="tests/test_data.csv")
     # # users = WindowsUsers()
     users.run()
     users.prn()
