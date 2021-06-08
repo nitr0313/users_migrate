@@ -87,6 +87,18 @@ class UsersList(list):
             if v1 and (v1 == val or val in v1):
                 res.append(item)
         return res if res else None
+    
+    def get_users_groups(self) -> set:
+        """
+        Собирает все группы пользователей в оде set
+
+        Returns:
+            set: Множество груп мигрирующих пользователей
+        """
+        res = set()
+        for user in self:
+            set.update(user.groups)
+        return res
 
     def __sub__(self, obj):
         """
@@ -188,6 +200,7 @@ class AbstractUsers(ABC):
         self.system_users = UsersList()
         self.migration_users = UsersList()
         self.path_file = path_users_file
+        self.local_groups = None
 
     def get_migration_users(self):
         if self.path_file is not None:
@@ -207,6 +220,9 @@ class AbstractUsers(ABC):
     def copy_users(self):
         for user in self.migration_users:
             self.create_user(user)
+        
+        for user in self.migration_users:
+            self.add_user_to_group(user)
 
     def get_remote_users(self) -> None:
         raise NotImplemented
@@ -218,6 +234,9 @@ class AbstractUsers(ABC):
         raise NotImplemented
     
     def create_user(self, user: User):
+        raise NotImplemented
+
+    def add_user_to_group(self, user: User):
         raise NotImplemented
 
     def get_users_from_file(self):
@@ -301,6 +320,44 @@ class WindowsUsers(AbstractUsers):
         print(cmd)
         # return
         text = self.__execute_comand(cmd=cmd)
+
+    def get_local_groups(self) -> set:
+        """
+        Множество всех локальных групп в локальной системе
+
+        Returns:
+            set: [description]
+        """
+        ...
+
+    def create_group(self, groupname: str) -> None:
+        """
+        Создать группу в локальной системе
+
+        Args:
+            groupname (str): [description]
+        """
+        ...
+
+    def add_user_to_group(self, user: User) -> None:
+        """
+        Добавление пользоватлей в группы на локальной системе
+
+        Args:
+            user (User): пользователь
+
+        Returns:
+            [type]: [description]
+        """
+        for group in self.migration_users.get_users_groups():
+            if not group in self.local_groups:
+                self.create_group(groupname=group)
+            cmd = [
+                'net',
+                'localgroup {group} {username}'.format(group=group, username=user.username),
+                '/ADD'
+            ]
+        
 
     def get_local_users(self):
 
