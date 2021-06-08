@@ -1,11 +1,12 @@
 import subprocess
 from dataclasses import dataclass, field
 from abc import ABC
-import wmi
 from getpass import getpass
 from utils import generate_password
 import csv
-import ctypes, sys
+import ctypes, sys, os
+import wmi
+
 
 def is_admin() -> bool:
     """
@@ -200,14 +201,14 @@ class AbstractUsers(ABC):
         self.migration_users = self.migration_users - self.system_users
         self.copy_users()
 
-    def get_local_users(self) -> list:
+    def get_local_users(self) -> None:
         raise NotImplemented
 
     def copy_users(self):
         for user in self.migration_users:
             self.create_user(user)
 
-    def get_remote_users(self) -> list:
+    def get_remote_users(self) -> None:
         raise NotImplemented
 
     def get_user_info(self):
@@ -275,10 +276,12 @@ class WindowsUsers(AbstractUsers):
 
     @staticmethod
     def __execute_comand(cmd: list) -> str:
+        if isinstance(cmd, list):
+            cmd = ' '.join(cmd)
         resp = subprocess.run(cmd, stdout=subprocess.PIPE)
         if resp.returncode != 0:
             raise ValueError(
-                f"Ошибка выполнения команды {cmd}! ErrorCode: {resp.returncode} " /
+                f"Ошибка выполнения команды {cmd}! ErrorCode: {resp.returncode} " \
                 f"{resp.stdout.decode('866')}"
                 )
         return resp.stdout.decode('866')
@@ -296,7 +299,7 @@ class WindowsUsers(AbstractUsers):
             ]
         cmd = [ arg.format(**user.as_cmd_dict()) for arg in cmd ]
         print(cmd)
-        return
+        # return
         text = self.__execute_comand(cmd=cmd)
 
     def get_local_users(self):
@@ -304,12 +307,9 @@ class WindowsUsers(AbstractUsers):
         cmd = ["net", "user"]
         resp = self.__execute_comand(cmd=cmd)
         temp_user_list= self.__pars_users_list(resp)
-        # result = []
         for usr in temp_user_list:
             user = self.get_user_info(usr)
             self.system_users.append(user)
-            # result.append(user)
-        # return result
 
     @staticmethod
     def __pars_users_list(data: str) -> list:
@@ -369,15 +369,14 @@ class WindowsUsers(AbstractUsers):
          username;fullname;active;need_pwd;can_change_pwd;password;groups
          admin; admin full name; 1; 1; 0; 12342; Администраторы, Пользователи удаленного рабочего стола
         """
-        # result = []
+
         with open(self.path_file, 'r', encoding="utf8", newline='\n') as fl:
             reader = csv.DictReader(fl, delimiter=';', skipinitialspace=True)
             for row in reader:
                 row['groups'] = [ group.strip() for group in row['groups'].split(",")]
                 user = User(**row)
                 self.migration_users.append(user)
-        # print(result)
-        # return result
+
 
 
 class Menu:
@@ -454,6 +453,8 @@ def users_groups():
 def exit_(msg=None):
     exit(msg)
 
+
+
 menu = {
     '1': [
         'Добавить пользователей', {
@@ -467,6 +468,8 @@ menu = {
     'default': ['Выход', exit_, {"msg": "Выбран выход из программы"}],
 }
 
+def load_menu():
+    return menu
 
 if __name__ == '__main__':
     if not is_admin():
