@@ -5,24 +5,80 @@ import wmi
 from getpass import getpass
 from utils import generate_password
 import csv
+import ctypes, sys
 
+def is_admin() -> bool:
+    """
+    Проверка на административные парава
+
+    Returns:
+        bool: True если программа запущена с админскими правами, False если нет
+    """
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False 
 
 class UsersList(list):
-    hash_item = set()
+    """
+    Класс список пользователей
 
-    def append(self, obj):
-        for item in self:
-            if item == obj:
-                print(f'Пользователь {obj} уже есть в списке!')
-                return False
+    Args:
+        list ([type]): [description]
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.hash_item = set()
+        super().__init__(*args, **kwargs)
+
+    def append(self, obj) -> None or False:
+        """
+        Метод переопределен и проверяет есть ли уже 
+        пользователь с таким username в списке перед добавлением
+        Если есть то не добавляет и возвращает False
+
+        Args:
+            obj ([UsersList]):
+
+        Returns:
+            None or False
+        """
+        if obj.get_hash_value() in self.hash_item:
+            print(f'Пользователь {obj} уже есть в списке!')
+            return False
         self.hash_item.add(obj.get_hash_value())
         super().append(obj)
+    
+    def __getattribute__(self, name):
+        if name in ['extend']:
+            raise AttributeError('no such method')
+        return super().__getattribute__(name)
 
-    def item_in(self, value) -> bool:
+    def item_in(self, value: str) -> bool:
+        """[summary]
+        Проверка на если такое имя в списке пользователей
+        Args:
+            value (str): В данном месте имя пользователя (username)
+
+        Returns:
+            bool: [description]
+        """
         return value.lower() in self.hash_item
 
-    def get_users_by_attr(self, attr, val):
-        res = MyList()
+    def get_users_by_attr(self, attr: str, val: str):
+        """
+        Поиск пользователей по какому-то атрибуту
+        get_users_by_attr('username', 'admin')
+
+        Args:
+            attr (str): Имя атрибута
+            val (str): Искомое значение атрибута
+
+        Returns:
+            UsersList or None: Новый список пользователей
+             или None если ничего не нашел
+        """
+        res = UsersList()
         for item in self:
             if not hasattr(item, attr):
                 continue
@@ -32,19 +88,40 @@ class UsersList(list):
         return res if res else None
 
     def __sub__(self, obj):
-        # print(type(self), type(obj))
-        if not isinstance(obj, type(self)):
+        """
+        Вычитание словарей
+
+        Args:
+            obj (UsersList): Список пользователей
+
+        Raises:
+            ValueError: Возникаует если тип передаваемого
+             обьекта отличается от исходного
+
+        Returns:
+            UsersList: Новый список пользователей
+        """
+        if not isinstance(obj, UsersList):
             raise ValueError(f"Оба объекта должны быть типа {type(self)}")
         result = UsersList()
         new_user_set = self.hash_item - obj.hash_item
         for user in self:
-            if user.get_hash_value in new_user_set:
+            if user.get_hash_value() in new_user_set:
                 result.append(user)
         return result
 
 
 @dataclass
 class User:
+    """
+    DataClass информация о пользователе
+
+    Raises:
+        ValueError: При сравнении оба обьекта должны быть типа User
+
+    Returns:
+        [type]: [description]
+    """
     username: str
     fullname: str = ""
     active: bool = False
@@ -68,19 +145,39 @@ class User:
             f'{"_"*50}'
         return result
 
-    def as_cmd_dict(self):
+    def as_cmd_dict(self) -> dict:
+        """
+        Создает словарь с ключами
+        которые являллись атрибутами класса,
+        добавляет несколько новых атрибутов
+
+        Returns:
+            dict: Словарь с данными пользователя
+        """
         result = self.__dict__
         result['active'] = "yes" if result['active'] else "no"
         result['passwordchg'] = "yes" if result['can_change_pwd'] else "no"
         result['passwordreq'] = "yes" if result['need_pwd'] else "no"
         result['comment'] = "Migrated by python"
         result['expires'] = 'never'
+        return self.__dict__
 
     def __eq__(self, object):
+        """
+        Сравнение двух обьектов одинакового типа
+
+        Args:
+            object ([type]): [description]
+
+        Raises:
+            ValueError: [description]
+
+        Returns:
+            [type]: [description]
+        """
         if not isinstance(object, User):
             raise ValueError(f"Ожидаемый тип объекта: {type(self)}, получен: {type(object)}")
         return self.get_hash_value() == object.get_hash_value()
-
 
 
 class AbstractUsers(ABC):
@@ -100,9 +197,15 @@ class AbstractUsers(ABC):
     def run(self) -> None:
         self.get_local_users()
         self.get_migration_users()
+        self.migration_users = self.migration_users - self.system_users
+        self.copy_users()
 
     def get_local_users(self) -> list:
         raise NotImplemented
+
+    def copy_users(self):
+        for user in self.migration_users:
+            self.create_user(user)
 
     def get_remote_users(self) -> list:
         raise NotImplemented
@@ -111,6 +214,9 @@ class AbstractUsers(ABC):
         raise NotImplemented
 
     def add_to_os(self):
+        raise NotImplemented
+    
+    def create_user(self, user: User):
         raise NotImplemented
 
     def get_users_from_file(self):
@@ -177,17 +283,21 @@ class WindowsUsers(AbstractUsers):
                 )
         return resp.stdout.decode('866')
 
-    def create_user(self):
-        new_users = self.migration_users - self.system_users
-        for user in new_users:
-            cmd = [
-                'net',
-                'user {username} {password}',
-                '/ADD',
-                '/FULLNAME "{fullname}"',
-                '/active:{active}'
-                ]
-            text = self.__execute_comand(cmd=cmd)
+    def create_user(self, user):
+        cmd = [
+            'net',
+            'user {username} {password}',
+            '/ADD',
+            '/fullname:"{fullname}"',
+            '/active:{active}',
+            '/passwordreq:{passwordreq}',
+            '/passwordchg:{passwordchg}',
+            '/comment:"{comment}"',
+            ]
+        cmd = [ arg.format(**user.as_cmd_dict()) for arg in cmd ]
+        print(cmd)
+        return
+        text = self.__execute_comand(cmd=cmd)
 
     def get_local_users(self):
 
@@ -268,7 +378,6 @@ class WindowsUsers(AbstractUsers):
                 self.migration_users.append(user)
         # print(result)
         # return result
-
 
 
 class Menu:
@@ -360,16 +469,19 @@ menu = {
 
 
 if __name__ == '__main__':
+    if not is_admin():
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
+
     # users = WindowsUsers(ip_remote_comp='192.168.0.251')
     users = WindowsUsers(path_users_file="tests/test_data.csv")
     # # users = WindowsUsers()
     users.run()
-    users.prn()
+    # users.prn()
 
-    new_users = users.migration_users.__sub__(users.system_users)
-    print("Новые пользователи: ")
-    for user in new_users:
-        print(str(user))
+    # new_users = users.migration_users.__sub__(users.system_users)
+    # print("Новые пользователи: ")
+    # for user in new_users:
+    #     print(str(user))
 
     # user_info = users.get_user_info("admin")
     # print(user_info)
