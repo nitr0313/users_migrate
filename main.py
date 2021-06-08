@@ -6,6 +6,43 @@ from getpass import getpass
 from utils import generate_password
 import csv
 
+
+class UsersList(list):
+    hash_item = set()
+
+    def append(self, obj):
+        for item in self:
+            if item == obj:
+                print(f'Пользователь {obj} уже есть в списке!')
+                return False
+        self.hash_item.add(obj.get_hash_value())
+        super().append(obj)
+
+    def item_in(self, value) -> bool:
+        return value.lower() in self.hash_item
+
+    def get_users_by_attr(self, attr, val):
+        res = MyList()
+        for item in self:
+            if not hasattr(item, attr):
+                continue
+            v1 = getattr(item, attr)
+            if v1 and (v1 == val or val in v1):
+                res.append(item)
+        return res if res else None
+
+    def __sub__(self, obj):
+        # print(type(self), type(obj))
+        if not isinstance(obj, type(self)):
+            raise ValueError(f"Оба объекта должны быть типа {type(self)}")
+        result = UsersList()
+        new_user_set = self.hash_item - obj.hash_item
+        for user in self:
+            if user.get_hash_value in new_user_set:
+                result.append(user)
+        return result
+
+
 @dataclass
 class User:
     username: str
@@ -15,6 +52,9 @@ class User:
     can_change_pwd: bool = False
     password: str = ""
     groups: list = field(default_factory=list)
+
+    def get_hash_value(self):
+        return self.username.lower()
 
     def __str__(self):
         result = f'{"-"*50}\n' \
@@ -28,13 +68,27 @@ class User:
             f'{"_"*50}'
         return result
 
+    def as_cmd_dict(self):
+        result = self.__dict__
+        result['active'] = "yes" if result['active'] else "no"
+        result['passwordchg'] = "yes" if result['can_change_pwd'] else "no"
+        result['passwordreq'] = "yes" if result['need_pwd'] else "no"
+        result['comment'] = "Migrated by python"
+        result['expires'] = 'never'
+
+    def __eq__(self, object):
+        if not isinstance(object, User):
+            raise ValueError(f"Ожидаемый тип объекта: {type(self)}, получен: {type(object)}")
+        return self.get_hash_value() == object.get_hash_value()
+
+
 
 class AbstractUsers(ABC):
 
     def __init__(self, path_users_file: str =None, ip_remote_comp: str = None):
         self.ip_remote_comp = ip_remote_comp
-        self.system_users = None
-        self.migration_users = None
+        self.system_users = UsersList()
+        self.migration_users = UsersList()
         self.path_file = path_users_file
 
     def get_migration_users(self):
@@ -44,8 +98,8 @@ class AbstractUsers(ABC):
             return self.get_remote_users()
 
     def run(self) -> None:
-        self.system_users = self.get_local_users()
-        self.migration_users = self.get_migration_users()
+        self.get_local_users()
+        self.get_migration_users()
 
     def get_local_users(self) -> list:
         raise NotImplemented
@@ -92,7 +146,7 @@ class WindowsUsers(AbstractUsers):
         remote_user = input('Введите имя пользвателя: ')
         password = getpass('Введите пароль: ')
         c = wmi.WMI(self.ip_remote_comp, user=remote_user, password=password)
-        result = []
+
         for user_wmi_info in c.Win32_UserAccount():
             if user_wmi_info.Disabled:
                 print(f"Пользователь {user_wmi_info.Caption} пропущен, так как аккаунт деактивирован")
@@ -110,7 +164,8 @@ class WindowsUsers(AbstractUsers):
                 password =  "",
                 groups =  groups
                 )
-        return result
+            self.migration_users.append(user)
+
 
     @staticmethod
     def __execute_comand(cmd: list) -> str:
@@ -122,15 +177,29 @@ class WindowsUsers(AbstractUsers):
                 )
         return resp.stdout.decode('866')
 
+    def create_user(self):
+        new_users = self.migration_users - self.system_users
+        for user in new_users:
+            cmd = [
+                'net',
+                'user {username} {password}',
+                '/ADD',
+                '/FULLNAME "{fullname}"',
+                '/active:{active}'
+                ]
+            text = self.__execute_comand(cmd=cmd)
+
     def get_local_users(self):
+
         cmd = ["net", "user"]
         resp = self.__execute_comand(cmd=cmd)
         temp_user_list= self.__pars_users_list(resp)
-        result = []
+        # result = []
         for usr in temp_user_list:
             user = self.get_user_info(usr)
-            result.append(user)
-        return result
+            self.system_users.append(user)
+            # result.append(user)
+        # return result
 
     @staticmethod
     def __pars_users_list(data: str) -> list:
@@ -190,15 +259,15 @@ class WindowsUsers(AbstractUsers):
          username;fullname;active;need_pwd;can_change_pwd;password;groups
          admin; admin full name; 1; 1; 0; 12342; Администраторы, Пользователи удаленного рабочего стола
         """
-        result = []
+        # result = []
         with open(self.path_file, 'r', encoding="utf8", newline='\n') as fl:
             reader = csv.DictReader(fl, delimiter=';', skipinitialspace=True)
             for row in reader:
                 row['groups'] = [ group.strip() for group in row['groups'].split(",")]
                 user = User(**row)
-                result.append(user)
-        print(result)
-        return result
+                self.migration_users.append(user)
+        # print(result)
+        # return result
 
 
 
@@ -296,6 +365,11 @@ if __name__ == '__main__':
     # # users = WindowsUsers()
     users.run()
     users.prn()
+
+    new_users = users.migration_users.__sub__(users.system_users)
+    print("Новые пользователи: ")
+    for user in new_users:
+        print(str(user))
 
     # user_info = users.get_user_info("admin")
     # print(user_info)
