@@ -20,109 +20,6 @@ def is_admin() -> bool:
     except:
         return False 
 
-class UsersList(list):
-    """
-    Класс список пользователей
-
-    Args:
-        list ([type]): [description]
-    """
-
-    def __init__(self, *args, **kwargs):
-        self.hash_item = set()
-        super().__init__(*args, **kwargs)
-
-    def append(self, obj) -> None or False:
-        """
-        Метод переопределен и проверяет есть ли уже 
-        пользователь с таким username в списке перед добавлением
-        Если есть то не добавляет и возвращает False
-
-        Args:
-            obj ([UsersList]):
-
-        Returns:
-            None or False
-        """
-        if obj.get_hash_value() in self.hash_item:
-            print(f'Пользователь {obj} уже есть в списке!')
-            return False
-        self.hash_item.add(obj.get_hash_value())
-        super().append(obj)
-    
-    def __getattribute__(self, name):
-        if name in ['extend']:
-            raise AttributeError('no such method')
-        return super().__getattribute__(name)
-
-    def item_in(self, value: str) -> bool:
-        """[summary]
-        Проверка на если такое имя в списке пользователей
-        Args:
-            value (str): В данном месте имя пользователя (username)
-
-        Returns:
-            bool: [description]
-        """
-        return value.lower() in self.hash_item
-
-    def get_users_by_attr(self, attr: str, val: str):
-        """
-        Поиск пользователей по какому-то атрибуту
-        get_users_by_attr('username', 'admin')
-
-        Args:
-            attr (str): Имя атрибута
-            val (str): Искомое значение атрибута
-
-        Returns:
-            UsersList or None: Новый список пользователей
-             или None если ничего не нашел
-        """
-        res = UsersList()
-        for item in self:
-            if not hasattr(item, attr):
-                continue
-            v1 = getattr(item, attr)
-            if v1 and (v1 == val or val in v1):
-                res.append(item)
-        return res if res else None
-    
-    def get_users_groups(self) -> set:
-        """
-        Собирает все группы пользователей в оде set
-
-        Returns:
-            set: Множество груп мигрирующих пользователей
-        """
-        res = set()
-        for user in self:
-            set.update(user.groups)
-        return res
-
-    def __sub__(self, obj):
-        """
-        Вычитание словарей
-
-        Args:
-            obj (UsersList): Список пользователей
-
-        Raises:
-            ValueError: Возникаует если тип передаваемого
-             обьекта отличается от исходного
-
-        Returns:
-            UsersList: Новый список пользователей
-        """
-        if not isinstance(obj, UsersList):
-            raise ValueError(f"Оба объекта должны быть типа {type(self)}")
-        result = UsersList()
-        new_user_set = self.hash_item - obj.hash_item
-        for user in self:
-            if user.get_hash_value() in new_user_set:
-                result.append(user)
-        return result
-
 
 @dataclass
 class User:
@@ -193,9 +90,116 @@ class User:
         return self.get_hash_value() == object.get_hash_value()
 
 
+class UsersList(list):
+    """
+    Класс список пользователей
+
+    Args:
+        list ([type]): [description]
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.hash_item = set()
+        super().__init__(*args, **kwargs)
+
+    def append(self, obj) -> None or False:
+        """
+        Метод переопределен и проверяет есть ли уже 
+        пользователь с таким username в списке перед добавлением
+        Если есть то не добавляет и возвращает False
+
+        Args:
+            obj ([UsersList]):
+
+        Returns:
+            None or False
+        """
+        if obj.get_hash_value() in self.hash_item:
+            print(f'Пользователь {obj} уже есть в списке!')
+            return False
+        self.hash_item.add(obj.get_hash_value())
+        super().append(obj)
+    
+    def __getattribute__(self, name):
+        if name in ['extend']:
+            raise AttributeError('no such method')
+        return super().__getattribute__(name)
+
+    def __contains__(self, o: User) -> bool:
+        return o.get_hash_value() in self.hash_item
+
+    def item_in(self, value: str) -> bool:
+        """[summary]
+        Проверка на если такое имя в списке пользователей
+        Args:
+            value (str): В данном месте имя пользователя (username)
+
+        Returns:
+            bool: [description]
+        """
+        return value.lower() in self.hash_item
+
+    def get_users_by_attr(self, attr: str, val: str):
+        """
+        Поиск пользователей по какому-то атрибуту
+        get_users_by_attr('username', 'admin')
+
+        Args:
+            attr (str): Имя атрибута
+            val (str): Искомое значение атрибута
+
+        Returns:
+            UsersList or None: Новый список пользователей
+             или None если ничего не нашел
+        """
+        res = UsersList()
+        for item in self:
+            if not hasattr(item, attr):
+                continue
+            v1 = getattr(item, attr)
+            if v1 and (v1 == val or val in v1):
+                res.append(item)
+        return res if res else None
+    
+    def get_users_groups(self) -> set:
+        """
+        Собирает все группы пользователей в оде set
+
+        Returns:
+            set: Множество груп мигрирующих пользователей
+        """
+        res = set()
+        for user in self:
+            set.update(user.groups)
+        return res
+
+    def __sub__(self, obj):
+        """
+        Вычитание словарей
+
+        Args:
+            obj (UsersList): Список пользователей
+
+        Raises:
+            ValueError: Возникаует если тип передаваемого
+             обьекта отличается от исходного
+
+        Returns:
+            UsersList: Новый список пользователей
+        """
+        if not isinstance(obj, UsersList):
+            raise ValueError(f"Оба объекта должны быть типа {type(self)}")
+        result = UsersList()
+        new_user_set = self.hash_item - obj.hash_item
+        for user in self:
+            if user.get_hash_value() in new_user_set:
+                result.append(user)
+        return result
+
+
 class AbstractUsers(ABC):
 
-    def __init__(self, path_users_file: str =None, ip_remote_comp: str = None):
+    def __init__(self, path_users_file: str = None, ip_remote_comp: str = None):
         self.ip_remote_comp = ip_remote_comp
         self.system_users = UsersList()
         self.migration_users = UsersList()
@@ -218,9 +222,14 @@ class AbstractUsers(ABC):
         raise NotImplemented
 
     def copy_users(self):
+        if input("Создаем новых пользователей? (Yes/No) ").lower() not in ['yes', 'да', '+', 'y']:
+            print("Обработка прервана, пользователи не скопированы.")
+            return
         for user in self.migration_users:
             self.create_user(user)
-        
+        if input("Добавляем новых пользователей в группы? (Yes/No) ").lower() not in ['yes', 'да', '+', 'y']:
+            print("Обработка прервана, пользователи не добавлены в группы.")
+            return
         for user in self.migration_users:
             self.add_user_to_group(user)
 
@@ -435,7 +444,6 @@ class WindowsUsers(AbstractUsers):
                 self.migration_users.append(user)
 
 
-
 class Menu:
     """
     Класс реализующий меню на основе словаря
@@ -507,6 +515,11 @@ def users_list():
 def users_groups():
     pass
 
+
+def add_users_from_remote_pc():
+    users = WindowsUsers(ip_remote_comp='192.168.0.251')
+    users.run()
+
 def exit_(msg=None):
     exit(msg)
 
@@ -517,6 +530,7 @@ menu = {
         'Добавить пользователей', {
             '1': ['Добавить пользователей из файла', add_users_from_file, {}],
             '2': ['Добавить вручную', add_users, {}],
+            '3': ['Добавить вручную', add_users_from_remote_pc, {}],
             'default': ['В предыдущее меню', {}, {}],
         }
     ],
@@ -532,11 +546,11 @@ if __name__ == '__main__':
     if not is_admin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
 
-    # users = WindowsUsers(ip_remote_comp='192.168.0.251')
-    users = WindowsUsers(path_users_file="tests/test_data.csv")
+    users = WindowsUsers(ip_remote_comp='192.168.0.251')
+    # users = WindowsUsers(path_users_file="tests/test_data.csv")
     # # users = WindowsUsers()
     users.run()
-    # users.prn()
+    users.prn()
 
     # new_users = users.migration_users.__sub__(users.system_users)
     # print("Новые пользователи: ")
