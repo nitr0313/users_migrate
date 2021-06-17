@@ -21,6 +21,15 @@ def is_admin() -> bool:
         return False 
 
 
+class AccessViolation(Exception):
+    """Ошибка доступа
+
+    Args:
+        Exception ([type]): [description]
+    """
+    pass 
+
+
 @dataclass
 class User:
     """
@@ -170,7 +179,7 @@ class UsersList(list):
         """
         res = set()
         for user in self:
-            set.update(user.groups)
+            res.update(user.groups)
         return res
 
     def __sub__(self, obj):
@@ -275,6 +284,7 @@ class WindowsUsers(AbstractUsers):
 
     def get_remote_users(self) -> list:
         """
+        Получает пользователей удаленно с помощью wmi
         TODO Работает но очень медленно, проблема в ассоциации пользователя с группами
 
         """
@@ -306,12 +316,15 @@ class WindowsUsers(AbstractUsers):
     def __execute_comand(cmd: list) -> str:
         if isinstance(cmd, list):
             cmd = ' '.join(cmd)
-        resp = subprocess.run(cmd, stdout=subprocess.PIPE)
-        if resp.returncode != 0:
-            raise ValueError(
-                f"Ошибка выполнения команды {cmd}! ErrorCode: {resp.returncode} " \
-                f"{resp.stdout.decode('866')}"
-                )
+        resp = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if resp.returncode != 0 and resp.returncode != 2:
+            if resp.returncode == 2 and "Системная ошибка 5" in resp.stdout.decode("866"):
+                raise AccessViolation("Ошибка доступа, запустите программу с правами администратора.")
+            elif resp.returncode != 2:
+                raise ValueError(
+                    f"Ошибка выполнения команды {cmd}! ErrorCode: {resp.returncode} " \
+                    f"{resp.stdout.decode('866')}"
+                    )
         return resp.stdout.decode('866')
 
     def create_user(self, user):
@@ -337,7 +350,18 @@ class WindowsUsers(AbstractUsers):
         Returns:
             set: [description]
         """
-        ...
+        cmd = ['net', 'localgroup']
+        text = self.__execute_comand(cmd=cmd)        
+        self.local_groups = self.pars_local_groups(text)
+
+    def pars_local_groups(self, data: str):
+        result = set()
+        data = data.replace("\r\n", "\n")
+        data = data.split('-')[-1]
+        for group in data.split("\n"):
+            if group.startswith("*"):
+                result.add(group.strip("*"))
+        return result
 
     def create_group(self, groupname: str) -> None:
         """
@@ -358,18 +382,21 @@ class WindowsUsers(AbstractUsers):
         Returns:
             [type]: [description]
         """
+        self.get_local_groups()
         for group in self.migration_users.get_users_groups():
             if not group in self.local_groups:
                 self.create_group(groupname=group)
             cmd = [
                 'net',
-                'localgroup {group} {username}'.format(group=group, username=user.username),
+                'localgroup "{group}" {username}'.format(group=group, username=user.username),
                 '/ADD'
             ]
-        
+            text = self.__execute_comand(cmd=cmd)
+            print(text)
 
     def get_local_users(self):
-
+        """Получение всех локальных пользователей через net user
+        """
         cmd = ["net", "user"]
         resp = self.__execute_comand(cmd=cmd)
         temp_user_list= self.__pars_users_list(resp)
@@ -379,6 +406,14 @@ class WindowsUsers(AbstractUsers):
 
     @staticmethod
     def __pars_users_list(data: str) -> list:
+        """Парасинг ответа сервера на запрос (net user) списка пользователей
+
+        Args:
+            data (str): строка содержащая список всех пользователей
+
+        Returns:
+            list: список пользователей кроме встроенных учетных записей
+        """
         data = data.replace('\r\n', '\n').strip().split('--\n')
         data.pop(0)
         data = data[0]
@@ -392,6 +427,14 @@ class WindowsUsers(AbstractUsers):
         return result
 
     def get_user_info(self, username: str) -> User:
+        """Получение информации по конкретному пользователю.
+
+        Args:
+            username (str): имя пользователя
+
+        Returns:
+            User: класс пользователя со всей достпной информацией
+        """
         cmd = ["net","user",username]
         resp = self.__execute_comand(cmd=cmd)
         user_info = self.__pars_users_info(resp)
@@ -504,6 +547,8 @@ class Menu:
 
 
 def add_users_from_file():
+    users = WindowsUsers(path_users_file='tests\\test_data.csv')
+    users.run()
     pass
 
 def add_users():
@@ -530,7 +575,7 @@ menu = {
         'Добавить пользователей', {
             '1': ['Добавить пользователей из файла', add_users_from_file, {}],
             '2': ['Добавить вручную', add_users, {}],
-            '3': ['Добавить вручную', add_users_from_remote_pc, {}],
+            '3': ['Добавить автоматически с удаленного компьютера', add_users_from_remote_pc, {}],
             'default': ['В предыдущее меню', {}, {}],
         }
     ],
@@ -545,12 +590,14 @@ def load_menu():
 if __name__ == '__main__':
     if not is_admin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
+    start_menu = Menu()
+    start_menu.main_loop()
 
-    users = WindowsUsers(ip_remote_comp='192.168.0.251')
+    # users = WindowsUsers(ip_remote_comp='192.168.0.251')
     # users = WindowsUsers(path_users_file="tests/test_data.csv")
     # # users = WindowsUsers()
-    users.run()
-    users.prn()
+    # users.run()
+    # users.prn()
 
     # new_users = users.migration_users.__sub__(users.system_users)
     # print("Новые пользователи: ")
