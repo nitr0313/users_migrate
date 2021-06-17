@@ -6,6 +6,10 @@ from utils import generate_password
 import csv
 import ctypes, sys, os
 import wmi
+import datetime
+from tkinter import Tk
+from tkinter.filedialog import askopenfilename
+
 
 
 def is_admin() -> bool:
@@ -225,7 +229,7 @@ class AbstractUsers(ABC):
         self.get_local_users()
         self.get_migration_users()
         self.migration_users = self.migration_users - self.system_users
-        self.copy_users()
+        # self.copy_users()
 
     def get_local_users(self) -> None:
         raise NotImplemented
@@ -280,6 +284,49 @@ class AbstractUsers(ABC):
                 print(str(user))
 
 
+class Password:
+    def __init__(self, generate_pass=True, complexity=2, pass_len=8, permanent_pass=None, use_salt=False):
+        """
+        generate_pass - bool Генерация пароля при каждом вызове get_pass
+        complexity: int (default 1): Сложность пароля
+            1. Только цифры
+            2. + буквы в нижнем регистре
+            3. + буквы  верхнем регистре
+            4. + специальные символы
+        pass_len: int (default 4): длинна пароля
+        Если длинна пароля = 0 возвращает пустую строку
+        Если длинна пароля меньше 4 и при этом сложность выше 2
+            сложность принимается за 2
+        permanent_pass - выдача постоянного пароля при generate_pass == False
+
+        Если generate_pass - о при каждом вызове метода get_pass удет возвращаться новый пароль
+        напротив generate_pass = False - будет возвращаться пустой пароль или permanent_pass 
+        или тот пароль который вы передадите при вызове метода get_pass(pass='123')
+        """
+        self.permanent_pass = permanent_pass
+        self.complexity = complexity
+        self.pass_len = pass_len
+        if generate_pass:
+            self.get_pass = self.gen_pass
+        else:
+            self.get_pass = self.get_permanent_password
+
+
+    def get_permanent_password(self, salt=None):
+        if self.permanent_pass is None and self.use_salt:
+            return str(salt)
+        if self.permanent_pass is not None and not self.use_salt:     
+            return self.permanent_pass
+        return str(salt) + self.permanent_pass
+
+    def gen_pass(self, salt=None):
+        new_pass = generate_password(self.complexity, self.pass_len)
+        return new_pass
+
+    def get_pass(self, salt=None):
+        ...
+
+
 class WindowsUsers(AbstractUsers):
 
     def get_remote_users(self) -> list:
@@ -290,6 +337,8 @@ class WindowsUsers(AbstractUsers):
         """
         remote_user = input('Введите имя пользвателя: ')
         password = getpass('Введите пароль: ')
+        user_pwd = self.set_users_password()
+        pwd = user_pwd()
         c = wmi.WMI(self.ip_remote_comp, user=remote_user, password=password)
 
         for user_wmi_info in c.Win32_UserAccount():
@@ -300,17 +349,33 @@ class WindowsUsers(AbstractUsers):
                 group.Caption.split("\\")[-1]
                 for group in user_wmi_info.associators(wmi_result_class="Win32_Group")
             ]
+            username = user_wmi_info.Caption.split("\\")[-1]
             user = User(
-                username =  user_wmi_info.Caption.split("\\")[-1],
+                username =  username,
                 fullname =  user_wmi_info.Fullname,
                 active = True,
                 need_pwd =  user_wmi_info.PasswordRequired,
                 can_change_pwd =  user_wmi_info.PasswordChangeable,
-                password =  "",
+                password =  pwd.gen_pass(salt=username),
                 groups =  groups
                 )
             self.migration_users.append(user)
 
+    def set_users_password(self):
+        messages = {
+            "1": ["Сгенерировать для каждого пользователя пароль",gen_pwd],
+            "2": ["Задать для каждого пользователя один пароль",permanent_pwd],
+            "3": ["Использовать в качестве пароля имя пользователя + постоянный пароль", gen_pwd2],
+            "4": ["Использовать в качестве пароля имя пользователя",gen_pwd3],
+        }
+        print("Если у пользователя не задан пароль: ")
+        for i, mess in messages.items():
+            print(f"{i}. {mess[0]}")
+        answer = input("-> ")
+        if answer not in messages.keys():
+            print("Вы выбрали не существуюший вариант, по умолчанию будет генерироваться пароль для каждого пользователя!")
+            answer = 1
+        return messages.get(answer)[1]
 
     @staticmethod
     def __execute_comand(cmd: list) -> str:
@@ -386,6 +451,7 @@ class WindowsUsers(AbstractUsers):
         for group in self.migration_users.get_users_groups():
             if not group in self.local_groups:
                 self.create_group(groupname=group)
+        for group in user.groups:
             cmd = [
                 'net',
                 'localgroup "{group}" {username}'.format(group=group, username=user.username),
@@ -478,14 +544,60 @@ class WindowsUsers(AbstractUsers):
          username;fullname;active;need_pwd;can_change_pwd;password;groups
          admin; admin full name; 1; 1; 0; 12342; Администраторы, Пользователи удаленного рабочего стола
         """
-
-        with open(self.path_file, 'r', encoding="utf8", newline='\n') as fl:
+        Tk().withdraw()
+        filename = askopenfilename()
+        user_pwd = self.set_users_password()
+        pwd = user_pwd()
+        with open(filename, 'r', encoding="utf8", newline='\n') as fl:
             reader = csv.DictReader(fl, delimiter=';', skipinitialspace=True)
             for row in reader:
                 row['groups'] = [ group.strip() for group in row['groups'].split(",")]
+                if not row['password'] or row['password'] is None:
+                    row['password'] = pwd.gen_pass(salt=row["username"])
                 user = User(**row)
                 self.migration_users.append(user)
 
+    def save_users_to_file(self):
+        from_where = '' if self.ip_remote_comp is None else self.ip_remote_comp
+        dt_now = datetime.datetime.now().strftime("%y-%m-%d_%H-%M")
+        file_path = f"files\\users_from_{from_where}_{dt_now}.csv" #_{datetime.datetime.now().__str__()[:-7]}
+        fieldnames = ['username','fullname','active','need_pwd','can_change_pwd','password','groups']
+        with open(file_path, 'w+', encoding="utf8", newline='') as fl:
+            writer = csv.DictWriter(fl, fieldnames=fieldnames, delimiter=';')
+            writer.writeheader()
+            for user in self.migration_users:
+                usr = user.__dict__
+                usr['groups'] = ",".join(usr['groups'])
+                writer.writerow(usr)
+
+
+def permanent_pwd():
+    """
+    Использование одного постоянного пароля
+    """
+    pwd = input("Введите постоянный пароль (Ex. 123) -> ")
+    return Password(generate_pass=False, permanent_pass=pwd)
+
+def gen_pwd():
+    """
+    Генерация полноценного пароля
+    """
+    complexity = int(input("Сложность пароля от 0 до 4 -> "))
+    len_pwd = int(input("Длинна пароля от 1 до 16 -> "))
+    return Password(complexity=complexity, pass_len=len_pwd)
+
+def gen_pwd2():
+    """
+    Пароль -username+pwd
+    """
+    pwd = input("Введите постоянный пароль (Ex. 123) -> ")
+    return Password(generate_pass=False, permanent_pass=pwd, use_salt=True)
+
+def gen_pwd3():
+    """
+    Пароль - имя пользователя
+    """
+    return Password(generate_pass=False, use_salt=True)
 
 class Menu:
     """
@@ -588,16 +700,28 @@ def load_menu():
     return menu
 
 if __name__ == '__main__':
+    # gen_password = Password()
+    # print(gen_password.get_pass())
+    # print(gen_password.get_pass(salt="username"))
+    # q534zhhk
+    # s3pre8h9
+
+    # perm_password = Password(generate_pass=False, permanent_pass='1234')
+    # print(perm_password.get_pass())
+    # print(perm_password.get_pass(salt="username"))
+    # 1234
+    # username1234
+
     if not is_admin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
-    start_menu = Menu()
-    start_menu.main_loop()
+    # start_menu = Menu()
+    # start_menu.main_loop()
 
     # users = WindowsUsers(ip_remote_comp='192.168.0.251')
-    # users = WindowsUsers(path_users_file="tests/test_data.csv")
-    # # users = WindowsUsers()
-    # users.run()
-    # users.prn()
+    users = WindowsUsers(path_users_file="tests/test_data.csv")
+    # users = WindowsUsers()
+    users.run()
+    users.save_users_to_file()
 
     # new_users = users.migration_users.__sub__(users.system_users)
     # print("Новые пользователи: ")
