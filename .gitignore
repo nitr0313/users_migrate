@@ -1,6 +1,6 @@
 .venv/
 migrate_users.sublime-project
-probe.py
+probe*.py
 .vscode/
 tests/
 __pycache__
