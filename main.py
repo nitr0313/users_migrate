@@ -316,6 +316,7 @@ class Password:
         напротив generate_pass = False - будет возвращаться пустой пароль или permanent_pass 
         или тот пароль который вы передадите при вызове метода get_pass(pass='123')
         """
+        self.use_salt = use_salt
         self.permanent_pass = permanent_pass
         self.complexity = complexity
         self.pass_len = pass_len
