@@ -9,8 +9,9 @@ import wmi
 import datetime
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
+import logging
 
-
+logging.basicConfig(level=logging.DEBUG)
 
 def is_admin() -> bool:
     """
@@ -229,46 +230,58 @@ class AbstractUsers(ABC):
         self.get_local_users()
         self.get_migration_users()
         self.migration_users = self.migration_users - self.system_users
-        # self.copy_users()
+        if not len(self.migration_users):
+            logging.info("Нет пользователей для переноса, возможно пользователи с такими именами уже есть на локальной машине")
+            return
+        self.save_users_to_file()
+        self.copy_users()
 
     def get_local_users(self) -> None:
         raise NotImplemented
 
+    def save_users_to_file(self) -> None:
+        raise NotImplemented
+
     def copy_users(self):
         if input("Создаем новых пользователей? (Yes/No) ").lower() not in ['yes', 'да', '+', 'y']:
-            print("Обработка прервана, пользователи не скопированы.")
+            logging.info("Обработка прервана, пользователи не скопированы.")
             return
         for user in self.migration_users:
             self.create_user(user)
+        
         if input("Добавляем новых пользователей в группы? (Yes/No) ").lower() not in ['yes', 'да', '+', 'y']:
-            print("Обработка прервана, пользователи не добавлены в группы.")
+            logging.info("Обработка прервана, пользователи не добавлены в группы.")
             return
+        self.create_groups()
         for user in self.migration_users:
             self.add_user_to_group(user)
 
     def get_remote_users(self) -> None:
-        raise NotImplemented
+        raise NotImplementedError
 
     def get_user_info(self):
-        raise NotImplemented
+        raise NotImplementedError
 
     def add_to_os(self):
-        raise NotImplemented
+        raise NotImplementedError
+    
+    def create_groups(self) -> None:
+        raise NotImplementedError
     
     def create_user(self, user: User):
-        raise NotImplemented
+        raise NotImplementedError
 
     def add_user_to_group(self, user: User):
-        raise NotImplemented
+        raise NotImplementedError
 
     def get_users_from_file(self):
-        raise NotImplemented
+        raise NotImplementedError
 
     def get_user_from_stdi(self):
         """
         пОЛУЧЕНИЕ информации о пользователе из input
         """
-        raise NotImplemented 
+        raise NotImplementedError 
 
     def __str__(self):
         return self
@@ -342,8 +355,8 @@ class WindowsUsers(AbstractUsers):
         c = wmi.WMI(self.ip_remote_comp, user=remote_user, password=password)
 
         for user_wmi_info in c.Win32_UserAccount():
-            if user_wmi_info.Disabled:
-                print(f"Пользователь {user_wmi_info.Caption} пропущен, так как аккаунт деактивирован")
+            if user_wmi_info.Disabled:                
+                logging.info(f"Пользователь {user_wmi_info.Caption} пропущен, так как аккаунт деактивирован")
                 continue
             groups = [
                 group.Caption.split("\\")[-1]
@@ -373,7 +386,7 @@ class WindowsUsers(AbstractUsers):
             print(f"{i}. {mess[0]}")
         answer = input("-> ")
         if answer not in messages.keys():
-            print("Вы выбрали не существуюший вариант, по умолчанию будет генерироваться пароль для каждого пользователя!")
+            logging.error("Вы выбрали не существуюший вариант, по умолчанию будет генерироваться пароль для каждого пользователя!")
             answer = 1
         return messages.get(answer)[1]
 
@@ -386,10 +399,10 @@ class WindowsUsers(AbstractUsers):
             if resp.returncode == 2 and "Системная ошибка 5" in resp.stdout.decode("866"):
                 raise AccessViolation("Ошибка доступа, запустите программу с правами администратора.")
             elif resp.returncode != 2:
-                raise ValueError(
-                    f"Ошибка выполнения команды {cmd}! ErrorCode: {resp.returncode} " \
-                    f"{resp.stdout.decode('866')}"
-                    )
+                msg = f"Ошибка выполнения команды {cmd}! ErrorCode: {resp.returncode} " \
+                        f"{resp.stdout.decode('866')}"
+                logging.error(msg)
+                raise ValueError(msg)
         return resp.stdout.decode('866')
 
     def create_user(self, user):
@@ -404,7 +417,7 @@ class WindowsUsers(AbstractUsers):
             '/comment:"{comment}"',
             ]
         cmd = [ arg.format(**user.as_cmd_dict()) for arg in cmd ]
-        print(cmd)
+        logging.debug(cmd)
         # return
         text = self.__execute_comand(cmd=cmd)
 
@@ -428,14 +441,18 @@ class WindowsUsers(AbstractUsers):
                 result.add(group.strip("*"))
         return result
 
-    def create_group(self, groupname: str) -> None:
+    def create_groups(self) -> None:
         """
         Создать группу в локальной системе
 
         Args:
             groupname (str): [description]
         """
-        ...
+        print("Создание групп на локальной машине... ")
+        self.get_local_groups()
+        for group in self.migration_users.get_users_groups():
+            if not group in self.local_groups:
+                ...
 
     def add_user_to_group(self, user: User) -> None:
         """
@@ -447,18 +464,15 @@ class WindowsUsers(AbstractUsers):
         Returns:
             [type]: [description]
         """
-        self.get_local_groups()
-        for group in self.migration_users.get_users_groups():
-            if not group in self.local_groups:
-                self.create_group(groupname=group)
         for group in user.groups:
+            print(f"Добавляем пользователя {user.username} в группу {group}")
             cmd = [
                 'net',
                 'localgroup "{group}" {username}'.format(group=group, username=user.username),
                 '/ADD'
             ]
             text = self.__execute_comand(cmd=cmd)
-            print(text)
+            logging.debug(text)
 
     def get_local_users(self):
         """Получение всех локальных пользователей через net user
@@ -556,6 +570,7 @@ class WindowsUsers(AbstractUsers):
                     row['password'] = pwd.gen_pass(salt=row["username"])
                 user = User(**row)
                 self.migration_users.append(user)
+        print(f"В файле найдено {len(self.migration_users)} пользователей для переноса!")
 
     def save_users_to_file(self):
         from_where = '' if self.ip_remote_comp is None else self.ip_remote_comp
@@ -563,10 +578,11 @@ class WindowsUsers(AbstractUsers):
         file_path = f"files\\users_from_{from_where}_{dt_now}.csv" #_{datetime.datetime.now().__str__()[:-7]}
         fieldnames = ['username','fullname','active','need_pwd','can_change_pwd','password','groups']
         with open(file_path, 'w+', encoding="utf8", newline='') as fl:
+            logging.info(f"Запись переносимых пользователей в файл: {file_path}")
             writer = csv.DictWriter(fl, fieldnames=fieldnames, delimiter=';')
             writer.writeheader()
             for user in self.migration_users:
-                usr = user.__dict__
+                usr = user.__dict__.copy()
                 usr['groups'] = ",".join(usr['groups'])
                 writer.writerow(usr)
 
@@ -582,7 +598,7 @@ def gen_pwd():
     """
     Генерация полноценного пароля
     """
-    complexity = int(input("Сложность пароля от 0 до 4 -> "))
+    complexity = int(input("Сложность пароля от 1 до 4 -> "))
     len_pwd = int(input("Длинна пароля от 1 до 16 -> "))
     return Password(complexity=complexity, pass_len=len_pwd)
 
@@ -678,7 +694,8 @@ def add_users_from_remote_pc():
     users.run()
 
 def exit_(msg=None):
-    exit(msg)
+    logging.info(msg)
+    exit()
 
 
 
@@ -700,33 +717,7 @@ def load_menu():
     return menu
 
 if __name__ == '__main__':
-    # gen_password = Password()
-    # print(gen_password.get_pass())
-    # print(gen_password.get_pass(salt="username"))
-    # q534zhhk
-    # s3pre8h9
-
-    # perm_password = Password(generate_pass=False, permanent_pass='1234')
-    # print(perm_password.get_pass())
-    # print(perm_password.get_pass(salt="username"))
-    # 1234
-    # username1234
-
     if not is_admin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
-    # start_menu = Menu()
-    # start_menu.main_loop()
-
-    # users = WindowsUsers(ip_remote_comp='192.168.0.251')
-    users = WindowsUsers(path_users_file="tests/test_data.csv")
-    # users = WindowsUsers()
-    users.run()
-    users.save_users_to_file()
-
-    # new_users = users.migration_users.__sub__(users.system_users)
-    # print("Новые пользователи: ")
-    # for user in new_users:
-    #     print(str(user))
-
-    # user_info = users.get_user_info("admin")
-    # print(user_info)
+    start_menu = Menu()
+    start_menu.main_loop()
