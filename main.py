@@ -128,6 +128,8 @@ class UsersList(list):
         Returns:
             None or False
         """
+        if not isinstance(obj, User):
+            raise ValueError(f"Ожидается обьект <User> пришел {type(obj)} -> {obj}")
         if obj.get_hash_value() in self.hash_item:
             print(f'Пользователь {obj} уже есть в списке!')
             return False
@@ -142,16 +144,16 @@ class UsersList(list):
     def __contains__(self, o: User) -> bool:
         return o.get_hash_value() in self.hash_item
 
-    def item_in(self, value: str) -> bool:
-        """[summary]
-        Проверка на если такое имя в списке пользователей
-        Args:
-            value (str): В данном месте имя пользователя (username)
+    # def item_in(self, value: str) -> bool:
+    #     """[summary]
+    #     Проверка на если такое имя в списке пользователей
+    #     Args:
+    #         value (str): В данном месте имя пользователя (username)
 
-        Returns:
-            bool: [description]
-        """
-        return value.lower() in self.hash_item
+    #     Returns:
+    #         bool: [description]
+    #     """
+    #     return value.lower() in self.hash_item
 
     def get_users_by_attr(self, attr: str, val: str):
         """
@@ -167,10 +169,13 @@ class UsersList(list):
              или None если ничего не нашел
         """
         res = UsersList()
+        val = val.lower()
         for item in self:
             if not hasattr(item, attr):
                 continue
             v1 = getattr(item, attr)
+            if isinstance(v1, str):
+                v1 = v1.lower()
             if v1 and (v1 == val or val in v1):
                 res.append(item)
         return res if res else None
