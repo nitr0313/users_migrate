@@ -326,19 +326,19 @@ class Password:
         self.complexity = complexity
         self.pass_len = pass_len
         if generate_pass:
-            self.get_pass = self.gen_pass
+            self.get_pass = self.__gen_pass
         else:
-            self.get_pass = self.get_permanent_password
+            self.get_pass = self.__get_permanent_password
 
 
-    def get_permanent_password(self, salt=None):
+    def __get_permanent_password(self, salt=None):
         if self.permanent_pass is None and self.use_salt:
             return str(salt)
         if self.permanent_pass is not None and not self.use_salt:     
             return self.permanent_pass
         return str(salt) + self.permanent_pass
 
-    def gen_pass(self, salt=None):
+    def __gen_pass(self, salt=None):
         new_pass = generate_password(self.complexity, self.pass_len)
         return new_pass
 
@@ -375,7 +375,7 @@ class WindowsUsers(AbstractUsers):
                 active = True,
                 need_pwd =  user_wmi_info.PasswordRequired,
                 can_change_pwd =  user_wmi_info.PasswordChangeable,
-                password =  pwd.gen_pass(salt=username),
+                password =  pwd.get_pass(salt=username),
                 groups =  groups
                 )
             self.migration_users.append(user)
@@ -573,7 +573,7 @@ class WindowsUsers(AbstractUsers):
             for row in reader:
                 row['groups'] = [ group.strip() for group in row['groups'].split(",")]
                 if not row['password'] or row['password'] is None:
-                    row['password'] = pwd.gen_pass(salt=row["username"])
+                    row['password'] = pwd.get_pass(salt=row["username"])
                 user = User(**row)
                 self.migration_users.append(user)
         print(f"В файле найдено {len(self.migration_users)} пользователей для переноса!")
